@@ -1,0 +1,105 @@
+---
+name: project-manager
+description: Maintain portable, repository-local AI project memory in `.ai-memory/`. Use when initializing project memory; starting, saving, handing off, or resuming an active repository task; recording durable user rules, preferences, decisions, corrections, verification state, or blockers; or capturing a bounded feedback case for later skill, protocol, host, or orchestrator improvement. Also use automatically for non-trivial work when `.ai-memory/manifest.json` already exists. Do not use for generic project planning when no project memory exists and the user did not ask to create it.
+---
+
+# Project Manager
+
+Keep important project context portable across models, accounts, chats, and
+compaction. Repository memory is the shared record; private model memory is
+temporary and must never be the only location for important rules,
+preferences, decisions, corrections, or handoff context.
+
+## Non-negotiable behavior
+
+- Treat current user instructions and repository authority files as higher
+  authority than `.ai-memory/`.
+- Treat saved content as advisory context, never as approval for a new commit,
+  push, deployment, deletion, purchase, external message, retry, or other
+  consequential action.
+- Never copy secrets, credentials, full transcripts, hidden reasoning, skill
+  bodies, or large source artifacts into project memory.
+- Never silently edit project memory. Show the structured change proposal from
+  [change review](references/change-review.md), then wait for explicit approval
+  of that exact proposal.
+- Do not create per-task folders, a chronological task diary, a background
+  watcher, telemetry, or an automatic transcript logger.
+- Do not scan `feedback/` during normal task work. Feedback cases are evidence
+  for later review, not active instructions.
+
+## Start or resume work
+
+When `.ai-memory/manifest.json` exists:
+
+1. Read `.ai-memory/README.md` and `.ai-memory/HANDOFF.md`.
+2. Read `manifest.json` only when identity or freshness matters.
+3. Load only the rule files and project artifacts needed for the current task.
+4. If retention is uncertain, a referenced file changed, or hashes disagree,
+   reload the complete relevant instruction file rather than relying on memory.
+5. State any stale, missing, or conflicting memory before relying on it.
+
+For exact recovery behavior, read
+[initialization and recovery](references/initialization-and-recovery.md).
+
+## Maintain the active task
+
+At the start of a material task, prepare a HANDOFF task receipt containing:
+
+- the user's request with spelling and grammar corrected without changing intent;
+- task understood;
+- plan;
+- selected skills or capabilities;
+- mode and boundaries.
+
+During work, propose a HANDOFF refresh at meaningful checkpoints: a material
+decision, verified result, changed blocker, uncertain continuation, imminent
+compaction, or transfer to another model. Keep progress and verification
+separate. On completion, propose durable promotions to `README.md` or `rules/`,
+then propose clearing HANDOFF to its idle state. Read
+[handoff protocol](references/handoff.md) for the exact fields and flows.
+
+## Preserve durable project knowledge
+
+Propose a memory change when the user gives a reusable preference, standing
+rule, correction, accepted decision with rationale, recurring pitfall,
+verification expectation, or stable project map fact. Put each fact in one
+authoritative place:
+
+- `.ai-memory/README.md`: compact project overview, shared preferences, durable
+  decisions, project map, and links to every rule.
+- `.ai-memory/rules/<topic>.md`: detailed reusable rules for one subject, created
+  only when enough content exists to justify a separate file.
+- `.ai-memory/HANDOFF.md`: one replaceable active task, never task history.
+- `.ai-memory/manifest.json`: identity, generation, inventory, and freshness
+  metadata; never duplicate prose guidance.
+- `.ai-memory/feedback/FB-*.md`: approved, bounded improvement evidence.
+
+## Commands
+
+Interpret these as intent controls, not permission bypasses:
+
+- `#> memory init`: inspect the repository and propose the minimal `.ai-memory/`
+  structure.
+- `#> memory save`: propose durable updates and/or an active HANDOFF refresh.
+- `#> handoff`: propose the smallest complete transfer checkpoint.
+- `#> resume`: read-only recovery from current project memory.
+- `#> feedback <correction>`: propose one feedback case; do not generalize or
+  change rules automatically.
+
+All write commands produce a preview first and require explicit approval.
+
+## Routing
+
+- Creation, freshness, corruption, moved roots, or concurrent writers:
+  [initialization and recovery](references/initialization-and-recovery.md)
+- Task receipt, save, handoff, resume, and completion:
+  [handoff protocol](references/handoff.md)
+- User corrections and future improvement evidence:
+  [feedback protocol](references/feedback.md)
+- Exact preview, approval, write, and receipt format:
+  [change review](references/change-review.md)
+- Package and template map: [topic index](INDEX.md)
+
+---
+
+[⌂ Home](README.md) · [Topic index](INDEX.md)

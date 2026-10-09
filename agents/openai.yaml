@@ -1,0 +1,4 @@
+interface:
+  display_name: "Project Manager"
+  short_description: "Portable project memory and task handoffs"
+  default_prompt: "Use $project-manager to initialize or maintain this repository’s portable project memory."

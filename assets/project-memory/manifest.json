@@ -1,0 +1,18 @@
+{
+  "schema_version": "1.0",
+  "project_id": "replace-with-stable-project-id",
+  "generation": 0,
+  "updated_at": null,
+  "entrypoint": ".ai-memory/README.md",
+  "handoff": ".ai-memory/HANDOFF.md",
+  "rules_dir": ".ai-memory/rules",
+  "feedback_dir": ".ai-memory/feedback",
+  "tracked_paths": [
+    ".ai-memory/README.md",
+    ".ai-memory/HANDOFF.md",
+    ".ai-memory/rules/README.md"
+  ],
+  "file_hashes": {},
+  "source_revision": null,
+  "host_delivery": {}
+}
