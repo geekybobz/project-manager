@@ -1,6 +1,6 @@
 ---
 name: project-manager
-description: Always-on project support for portable, repository-local AI memory in `.ai-memory/`. Use for every non-trivial repository or project task to initialize or read project memory, maintain the active HANDOFF, preserve durable rules and preferences, recover context, and capture approved feedback. Do not use for conversation with no project or working directory.
+description: Always-on project support for portable, repository-local AI memory in `.ai-memory/`. Use for every repository or project task to initialize or read project memory, maintain the active HANDOFF, preserve durable rules and preferences, recover context, and capture approved feedback. Do not use for conversation with no project or working directory.
 ---
 
 # Project Manager
@@ -10,8 +10,8 @@ compaction. Repository memory is the shared record; private model memory is
 temporary and must never be the only location for important rules,
 preferences, decisions, corrections, or handoff context.
 
-This capability is mandatory and always active for non-trivial work in a
-project or repository. At task entry, check for `.ai-memory/manifest.json`. If
+This capability is mandatory and always active for every task in a project or
+repository. At task entry, check for `.ai-memory/manifest.json`. If
 it is absent, state that project memory is not initialized and propose
 `project-manager init`; do not silently create it. If present, follow the start
 or resume procedure below. Maintain the HANDOFF and durable memory at material

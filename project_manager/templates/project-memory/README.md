@@ -1,7 +1,7 @@
 ---
 role: front-door
 summary: Shared project context, durable preferences, rules, decisions, and navigation.
-read_when: Read first when beginning non-trivial work in this project.
+read_when: Read first when beginning work in this project.
 ---
 
 # Project memory

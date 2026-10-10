@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.2.1
+
+Clarifies that mandatory Project Manager support applies to every project or
+repository task, not only tasks judged non-trivial. Write approval and privacy
+boundaries are unchanged.
+
 ## 0.2.0
 
 Adds the dependency-free `project-manager`/`pmem` terminal interface for
