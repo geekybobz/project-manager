@@ -20,10 +20,16 @@ REQUIRED = (
     "references/handoff.md",
     "references/feedback.md",
     "references/change-review.md",
-    "assets/project-memory/README.md",
-    "assets/project-memory/HANDOFF.md",
-    "assets/project-memory/manifest.json",
-    "assets/project-memory/rules/README.md",
+    "project_manager/__init__.py",
+    "project_manager/__main__.py",
+    "project_manager/cli.py",
+    "project_manager/core.py",
+    "project_manager/templates/project-memory/README.md",
+    "project_manager/templates/project-memory/HANDOFF.md",
+    "project_manager/templates/project-memory/manifest.json",
+    "project_manager/templates/project-memory/rules/README.md",
+    "pyproject.toml",
+    "tests/test_cli.py",
     "VERSION",
     "CHANGELOG.md",
     "LICENSE",
@@ -53,7 +59,7 @@ def main() -> int:
         if command not in skill:
             errors.append(f"SKILL.md omits command: {command}")
 
-    manifest_path = ROOT / "assets/project-memory/manifest.json"
+    manifest_path = ROOT / "project_manager/templates/project-memory/manifest.json"
     manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
     for key in (
         "schema_version",
@@ -69,7 +75,7 @@ def main() -> int:
         if key not in manifest:
             errors.append(f"manifest template omits key: {key}")
 
-    front_door = (ROOT / "assets/project-memory/README.md").read_text(
+    front_door = (ROOT / "project_manager/templates/project-memory/README.md").read_text(
         encoding="utf-8"
     )
     for link in ("HANDOFF.md", "rules/README.md"):
@@ -77,6 +83,8 @@ def main() -> int:
             errors.append(f"project-memory README omits direct link: {link}")
 
     for path in ROOT.rglob("*.md"):
+        if ".git" in path.parts:
+            continue
         text = path.read_text(encoding="utf-8")
         if path.name != "LICENSE" and "[⌂ " not in text:
             errors.append(

@@ -54,4 +54,4 @@ or large artifacts here.
 
 ---
 
-[⌂ Project memory](README.md) · [Active handoff](HANDOFF.md)
+[⌂ Home](README.md) · [Active handoff](HANDOFF.md)

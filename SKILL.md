@@ -1,6 +1,6 @@
 ---
 name: project-manager
-description: Maintain portable, repository-local AI project memory in `.ai-memory/`. Use when initializing project memory; starting, saving, handing off, or resuming an active repository task; recording durable user rules, preferences, decisions, corrections, verification state, or blockers; or capturing a bounded feedback case for later skill, protocol, host, or orchestrator improvement. Also use automatically for non-trivial work when `.ai-memory/manifest.json` already exists. Do not use for generic project planning when no project memory exists and the user did not ask to create it.
+description: Always-on project support for portable, repository-local AI memory in `.ai-memory/`. Use for every non-trivial repository or project task to initialize or read project memory, maintain the active HANDOFF, preserve durable rules and preferences, recover context, and capture approved feedback. Do not use for conversation with no project or working directory.
 ---
 
 # Project Manager
@@ -9,6 +9,13 @@ Keep important project context portable across models, accounts, chats, and
 compaction. Repository memory is the shared record; private model memory is
 temporary and must never be the only location for important rules,
 preferences, decisions, corrections, or handoff context.
+
+This capability is mandatory and always active for non-trivial work in a
+project or repository. At task entry, check for `.ai-memory/manifest.json`. If
+it is absent, state that project memory is not initialized and propose
+`project-manager init`; do not silently create it. If present, follow the start
+or resume procedure below. Maintain the HANDOFF and durable memory at material
+checkpoints even when the user does not repeat a save command.
 
 ## Non-negotiable behavior
 
@@ -87,6 +94,23 @@ Interpret these as intent controls, not permission bypasses:
   change rules automatically.
 
 All write commands produce a preview first and require explicit approval.
+
+The deterministic terminal companion uses `project-manager` (short alias:
+`pmem`):
+
+- `project-manager init .`: preview initialization; add `--apply` only after
+  review.
+- `project-manager status .` and `project-manager check .`: inspect state and
+  freshness without writing.
+- `project-manager context . --format json`: return bounded recovery context.
+- `project-manager change preview PLAN.json`: validate an exact model-prepared
+  change.
+- `project-manager change apply PLAN.json --approval-ref PM-...`: atomically
+  apply only the approved plan.
+- `project-manager handoff show .` or `handoff clear`: inspect or prepare an
+  idle handoff.
+- `project-manager feedback draft . --input FEEDBACK.json`: prepare a bounded
+  feedback change without applying it.
 
 ## Routing
 

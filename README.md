@@ -18,12 +18,16 @@ not entrusted only to a model account's private memory.
 
 - Apply the skill: [operational entry](SKILL.md)
 - Browse the package: [topic index](INDEX.md)
-- Inspect the generated structure: [project-memory template](assets/project-memory/README.md)
+- Inspect the generated structure: [project-memory template](project_manager/templates/project-memory/README.md)
 - Verify the package: `python3 scripts/verify_package.py`
+- Install the terminal command: `python3 -m pip install .`
+- Preview initialization: `project-manager init /path/to/project`
+- Review released behavior: [changelog](CHANGELOG.md)
 
-The first release supplies the protocol, review contract, and reusable
-templates. A broader registry/collector API can be added later without changing
-the repository-local file contract.
+The terminal interface initializes and validates memory, emits compact recovery
+context, prepares feedback, and applies exact approved change plans. A broader
+cross-project registry can be added later without changing the repository-local
+file contract.
 
 ## Boundaries
 

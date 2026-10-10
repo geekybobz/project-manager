@@ -21,10 +21,18 @@ read_when: Use when the operational entry points to a specific workflow.
 
 ## Reusable output templates
 
-- [Project memory front door](assets/project-memory/README.md)
-- [Active handoff](assets/project-memory/HANDOFF.md)
-- [Machine manifest](assets/project-memory/manifest.json)
-- [Rules index](assets/project-memory/rules/README.md)
+- [Project memory front door](project_manager/templates/project-memory/README.md)
+- [Active handoff](project_manager/templates/project-memory/HANDOFF.md)
+- [Machine manifest](project_manager/templates/project-memory/manifest.json)
+- [Rules index](project_manager/templates/project-memory/rules/README.md)
+
+## Terminal interface
+
+- `project-manager init`: deterministic initialization preview and apply.
+- `project-manager status`, `check`, and `context`: read-only inspection.
+- `project-manager change`: exact preview and atomic approved apply.
+- `project-manager handoff` and `feedback`: focused lifecycle helpers.
+- `pmem`: short alias for the same executable.
 
 ---
 

@@ -15,4 +15,4 @@ files by model or reader type.
 
 ---
 
-[⌂ Project memory](../README.md)
+[⌂ Home](../README.md)

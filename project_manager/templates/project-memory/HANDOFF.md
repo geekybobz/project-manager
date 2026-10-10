@@ -2,7 +2,6 @@
 role: topic
 summary: One replaceable active task handoff; idle when no task is in progress.
 read_when: Read after the project-memory front door when starting or resuming work.
-status: idle
 ---
 
 # Active handoff
@@ -37,4 +36,4 @@ through an approved Project Memory change:
 
 ---
 
-[⌂ Project memory](README.md)
+[⌂ Home](README.md)
