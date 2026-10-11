@@ -17,7 +17,9 @@ from typing import Any
 
 SCHEMA_VERSION = "1.0"
 CHANGE_SCHEMA = "project-manager/change/1"
+PENDING_SCHEMA = "project-manager/pending-review/1"
 MEMORY_DIR = ".ai-memory"
+PENDING_REVIEW_PATH = ".ai-memory/review/pending.json"
 REQUIRED_PATHS = (
     ".ai-memory/README.md",
     ".ai-memory/HANDOFF.md",
@@ -26,6 +28,7 @@ REQUIRED_PATHS = (
 )
 MAX_CONTEXT_BYTES = 48 * 1024
 MAX_CHANGE_BYTES = 64 * 1024
+MAX_PENDING_BYTES = 2 * 1024 * 1024
 AUTHORITY_CANDIDATES = ("AGENTS.md", "CLAUDE.md")
 PROPOSAL_RE = re.compile(r"^PM-\d{8}-[A-Z0-9]{6}$")
 SECRET_PATTERNS = (
@@ -63,6 +66,7 @@ class ValidationResult:
             "errors": list(self.errors),
             "warnings": list(self.warnings),
             "stale_paths": list(self.stale_paths),
+            "pending_review": pending_review_status(self.root),
         }
 
 
@@ -127,17 +131,27 @@ def _safe_memory_path(root: Path, relative: str) -> Path:
     return resolved
 
 
-def _atomic_write(path: Path, content: str) -> None:
+def _atomic_write(path: Path, content: str, *, mode: int = 0o644) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
-    with tempfile.NamedTemporaryFile(
-        mode="w", encoding="utf-8", dir=path.parent, delete=False
-    ) as handle:
-        handle.write(content)
-        handle.flush()
-        os.fsync(handle.fileno())
-        temporary = Path(handle.name)
-    os.chmod(temporary, 0o644)
-    os.replace(temporary, path)
+    temporary: Path | None = None
+    try:
+        with tempfile.NamedTemporaryFile(
+            mode="w",
+            encoding="utf-8",
+            dir=path.parent,
+            prefix=f"{path.name}.write-",
+            delete=False,
+        ) as handle:
+            handle.write(content)
+            handle.flush()
+            os.fsync(handle.fileno())
+            temporary = Path(handle.name)
+        os.chmod(temporary, mode)
+        os.replace(temporary, path)
+        temporary = None
+    finally:
+        if temporary is not None:
+            temporary.unlink(missing_ok=True)
 
 
 def initial_files(root: Path) -> dict[str, str]:
@@ -147,6 +161,8 @@ def initial_files(root: Path) -> dict[str, str]:
         ".ai-memory/README.md": _template("README.md"),
         ".ai-memory/HANDOFF.md": _template("HANDOFF.md"),
         ".ai-memory/rules/README.md": _template("rules/README.md"),
+        ".ai-memory/review/README.md": _template("review/README.md"),
+        ".ai-memory/review/.gitignore": _template("review/.gitignore"),
     }
     manifest = json.loads(_template("manifest.json"))
     manifest["project_id"] = project_id_for(root)
@@ -174,6 +190,7 @@ def apply_initialization(root: Path, files: dict[str, str]) -> None:
             target.unlink(missing_ok=True)
         for directory in (
             root / MEMORY_DIR / "rules",
+            root / MEMORY_DIR / "review",
             root / MEMORY_DIR,
         ):
             try:
@@ -416,6 +433,205 @@ def load_change(path: Path) -> dict[str, Any]:
     return change
 
 
+def _binding_payload(change: dict[str, Any]) -> dict[str, Any]:
+    """Return the exact content covered by a proposal approval."""
+    return {key: value for key, value in change.items() if key != "proposal_id"}
+
+
+def _binding_sha256(change: dict[str, Any]) -> str:
+    encoded = json.dumps(
+        _binding_payload(change), sort_keys=True, separators=(",", ":")
+    ).encode("utf-8")
+    return sha256_bytes(encoded)
+
+
+def _bound_change(change: dict[str, Any]) -> tuple[dict[str, Any], str]:
+    """Copy a change and bind its short proposal reference to exact contents."""
+    bound = json.loads(json.dumps(change))
+    if not isinstance(bound, dict):
+        raise ProjectManagerError("change plan must be a JSON object")
+    binding = _binding_sha256(bound)
+    date = datetime.now(timezone.utc).strftime("%Y%m%d")
+    bound["proposal_id"] = f"PM-{date}-{binding[:6].upper()}"
+    return bound, binding
+
+
+def pending_review_status(root: Path) -> dict[str, Any]:
+    path = _safe_memory_path(root, PENDING_REVIEW_PATH)
+    if not path.is_file():
+        return {
+            "status": "none",
+            "path": PENDING_REVIEW_PATH,
+            "proposal_id": None,
+            "files": [],
+        }
+    try:
+        record = json.loads(path.read_text(encoding="utf-8"))
+        if not isinstance(record, dict) or record.get("schema") != PENDING_SCHEMA:
+            raise ProjectManagerError("pending review has an unsupported schema")
+        change = record.get("change")
+        if not isinstance(change, dict):
+            raise ProjectManagerError("pending review omits its change plan")
+        binding = _binding_sha256(change)
+        if record.get("binding_sha256") != binding:
+            raise ProjectManagerError("pending review content binding changed")
+        proposal_id = change.get("proposal_id")
+        if (
+            not isinstance(proposal_id, str)
+            or not PROPOSAL_RE.fullmatch(proposal_id)
+            or proposal_id.rsplit("-", 1)[1] != binding[:6].upper()
+        ):
+            raise ProjectManagerError("pending review proposal reference changed")
+        manifest = load_manifest(root)
+        current_generation = manifest.get("generation")
+        status = (
+            "ready"
+            if change.get("project_id") == manifest.get("project_id")
+            and change.get("base_generation") == current_generation
+            else "stale"
+        )
+        validation_error: str | None = None
+        if status == "ready":
+            try:
+                _validated_change(root, change)
+            except ProjectManagerError as exc:
+                status = "stale"
+                validation_error = str(exc)
+        operations = change.get("operations", [])
+        files = [
+            item.get("path")
+            for item in operations
+            if isinstance(item, dict) and isinstance(item.get("path"), str)
+        ]
+        return {
+            "status": status,
+            "path": PENDING_REVIEW_PATH,
+            "proposal_id": proposal_id,
+            "files": files,
+            "base_generation": change.get("base_generation"),
+            "current_generation": current_generation,
+            **({"error": validation_error} if validation_error else {}),
+        }
+    except (OSError, json.JSONDecodeError, ProjectManagerError) as exc:
+        return {
+            "status": "invalid",
+            "path": PENDING_REVIEW_PATH,
+            "proposal_id": None,
+            "files": [],
+            "error": str(exc),
+        }
+
+
+def load_pending_change(
+    root: Path, *, validate_current: bool = True
+) -> dict[str, Any]:
+    path = _safe_memory_path(root, PENDING_REVIEW_PATH)
+    try:
+        raw = path.read_bytes()
+    except FileNotFoundError as exc:
+        raise ProjectManagerError(
+            "no pending memory review; run project-manager change preview first"
+        ) from exc
+    if len(raw) > MAX_PENDING_BYTES:
+        raise ProjectManagerError("pending review exceeds the size limit")
+    try:
+        record = json.loads(raw)
+    except json.JSONDecodeError as exc:
+        raise ProjectManagerError(f"invalid pending review JSON: {exc}") from exc
+    if not isinstance(record, dict) or record.get("schema") != PENDING_SCHEMA:
+        raise ProjectManagerError("pending review has an unsupported schema")
+    change = record.get("change")
+    if not isinstance(change, dict):
+        raise ProjectManagerError("pending review omits its change plan")
+    binding = _binding_sha256(change)
+    if record.get("binding_sha256") != binding:
+        raise ProjectManagerError("pending review content binding changed")
+    proposal_id = change.get("proposal_id")
+    if (
+        not isinstance(proposal_id, str)
+        or not PROPOSAL_RE.fullmatch(proposal_id)
+        or proposal_id.rsplit("-", 1)[1] != binding[:6].upper()
+    ):
+        raise ProjectManagerError("pending review proposal reference changed")
+    if validate_current:
+        _validated_change(root, change)
+    return change
+
+
+def stage_change(
+    root: Path, change: dict[str, Any], *, replace_pending: bool = False
+) -> dict[str, Any]:
+    bound, binding = _bound_change(change)
+    preview = preview_change(root, bound)
+    pending = _safe_memory_path(root, PENDING_REVIEW_PATH)
+    if pending.exists():
+        status = pending_review_status(root)
+        if status.get("status") == "invalid":
+            raise ProjectManagerError(
+                "pending review is invalid; inspect or explicitly discard it first"
+            )
+        existing = load_pending_change(root, validate_current=False)
+        if status.get("status") == "ready" and _binding_sha256(existing) == binding:
+            return preview_change(root, existing) | {
+                "pending_path": PENDING_REVIEW_PATH,
+                "staged": True,
+            }
+        if not replace_pending:
+            raise ProjectManagerError(
+                "another memory review is pending; run project-manager review show "
+                "or explicitly replace/discard it"
+            )
+    record = {
+        "schema": PENDING_SCHEMA,
+        "created_at": datetime.now(timezone.utc).isoformat(),
+        "binding_sha256": binding,
+        "change": bound,
+    }
+    encoded = json.dumps(record, indent=2, sort_keys=True) + "\n"
+    if len(encoded.encode("utf-8")) > MAX_PENDING_BYTES:
+        raise ProjectManagerError("pending review exceeds the size limit")
+    _atomic_write(pending, encoded, mode=0o600)
+    return preview | {"pending_path": PENDING_REVIEW_PATH, "staged": True}
+
+
+def pending_matches_change(root: Path, change: dict[str, Any]) -> dict[str, Any]:
+    bound, binding = _bound_change(change)
+    pending = load_pending_change(root)
+    if _binding_sha256(pending) != binding:
+        raise ProjectManagerError("supplied change does not match the pending review")
+    return bound
+
+
+def apply_pending_change(root: Path, *, approval_ref: str) -> dict[str, Any]:
+    change = load_pending_change(root)
+    receipt = apply_change(root, change, approval_ref=approval_ref)
+    _safe_memory_path(root, PENDING_REVIEW_PATH).unlink(missing_ok=True)
+    return receipt | {"pending_review": "removed"}
+
+
+def discard_pending_change(root: Path) -> dict[str, Any]:
+    path = _safe_memory_path(root, PENDING_REVIEW_PATH)
+    if not path.is_file():
+        raise ProjectManagerError("no pending memory review to discard")
+    proposal_id: str | None = None
+    try:
+        record = json.loads(path.read_text(encoding="utf-8"))
+        if isinstance(record, dict) and isinstance(record.get("change"), dict):
+            candidate = record["change"].get("proposal_id")
+            if isinstance(candidate, str):
+                proposal_id = candidate
+    except (OSError, json.JSONDecodeError):
+        pass
+    path.unlink()
+    return {
+        "schema": "project-manager/review-discard/1",
+        "result": "discarded",
+        "proposal_id": proposal_id,
+        "path": PENDING_REVIEW_PATH,
+        "memory_changed": False,
+    }
+
+
 def _validated_change(root: Path, change: dict[str, Any]) -> list[dict[str, Any]]:
     manifest = load_manifest(root)
     if change.get("schema") != CHANGE_SCHEMA:
@@ -477,6 +693,7 @@ def preview_change(root: Path, change: dict[str, Any]) -> dict[str, Any]:
         "proposal_id": change["proposal_id"],
         "project_id": change["project_id"],
         "base_generation": change["base_generation"],
+        "reason": change.get("reason", "Update project memory."),
         "status": "awaiting-approval",
         "operations": operations,
     }

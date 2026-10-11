@@ -29,6 +29,8 @@ REQUIRED = (
     "project_manager/templates/project-memory/HANDOFF.md",
     "project_manager/templates/project-memory/manifest.json",
     "project_manager/templates/project-memory/rules/README.md",
+    "project_manager/templates/project-memory/review/README.md",
+    "project_manager/templates/project-memory/review/.gitignore",
     "pyproject.toml",
     "tests/test_cli.py",
     "VERSION",

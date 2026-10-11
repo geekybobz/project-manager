@@ -48,6 +48,11 @@ a host issue, a documentation correction, insufficient evidence, or no change.
 Any promoted edit has its own change proposal and approval. Preserve the
 original user correction; do not rewrite it as a model conclusion.
 
+Use `project-manager feedback draft . --input -` to accept the bounded JSON
+payload through standard input. The generated feedback change uses the same
+visible `.ai-memory/review/pending.json` slot and the same approval boundary as
+any other memory edit; drafting never adds the feedback record directly.
+
 ---
 
 [⌂ Home](../README.md) · [Topic index](../INDEX.md)

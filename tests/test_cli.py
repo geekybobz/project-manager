@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import stat
 import subprocess
 import sys
 import tempfile
@@ -9,14 +10,19 @@ from pathlib import Path
 
 from project_manager.core import (
     apply_change,
+    apply_pending_change,
     apply_initialization,
     context_payload,
+    discard_pending_change,
     feedback_change,
     initial_files,
     load_manifest,
+    load_pending_change,
+    pending_review_status,
     preview_change,
     refresh_payload,
     sha256_file,
+    stage_change,
     validate,
 )
 
@@ -32,6 +38,29 @@ class ProjectManagerTests(unittest.TestCase):
     def initialize(self) -> None:
         apply_initialization(self.root, initial_files(self.root))
 
+    def change_plan(self, replacement: str = "Keep verification claims evidence-bounded.") -> dict:
+        manifest = load_manifest(self.root)
+        target = self.root / ".ai-memory" / "README.md"
+        content = target.read_text(encoding="utf-8").replace(
+            "<Durable user preference that materially changes future work.>",
+            replacement,
+        )
+        return {
+            "schema": "project-manager/change/1",
+            "proposal_id": "PM-20261010-ABC123",
+            "project_id": manifest["project_id"],
+            "base_generation": manifest["generation"],
+            "reason": "Preserve one durable verification preference.",
+            "operations": [
+                {
+                    "path": ".ai-memory/README.md",
+                    "operation": "replace",
+                    "current_sha256": sha256_file(target),
+                    "content": content,
+                }
+            ],
+        }
+
     def test_initialization_is_complete_and_fresh(self) -> None:
         files = initial_files(self.root)
         self.assertFalse((self.root / ".ai-memory").exists())
@@ -40,6 +69,11 @@ class ProjectManagerTests(unittest.TestCase):
         self.assertTrue(result.valid)
         self.assertEqual((), result.stale_paths)
         self.assertEqual(0, result.generation)
+        self.assertTrue((self.root / ".ai-memory" / "review" / "README.md").is_file())
+        self.assertIn(
+            "pending.json",
+            (self.root / ".ai-memory" / "review" / ".gitignore").read_text(),
+        )
 
     def test_context_is_bounded_and_contains_handoff(self) -> None:
         self.initialize()
@@ -125,26 +159,7 @@ class ProjectManagerTests(unittest.TestCase):
 
     def test_exact_change_updates_generation_and_hash(self) -> None:
         self.initialize()
-        manifest = load_manifest(self.root)
-        target = self.root / ".ai-memory" / "README.md"
-        content = target.read_text(encoding="utf-8").replace(
-            "<Durable user preference that materially changes future work.>",
-            "Keep verification claims evidence-bounded.",
-        )
-        change = {
-            "schema": "project-manager/change/1",
-            "proposal_id": "PM-20261010-ABC123",
-            "project_id": manifest["project_id"],
-            "base_generation": 0,
-            "operations": [
-                {
-                    "path": ".ai-memory/README.md",
-                    "operation": "replace",
-                    "current_sha256": sha256_file(target),
-                    "content": content,
-                }
-            ],
-        }
+        change = self.change_plan()
         preview = preview_change(self.root, change)
         self.assertEqual("awaiting-approval", preview["status"])
         receipt = apply_change(
@@ -153,6 +168,71 @@ class ProjectManagerTests(unittest.TestCase):
         self.assertEqual("applied", receipt["result"])
         self.assertEqual(1, load_manifest(self.root)["generation"])
         self.assertFalse(validate(self.root).stale_paths)
+
+    def test_stage_is_visible_bound_and_idempotent(self) -> None:
+        self.initialize()
+        preview = stage_change(self.root, self.change_plan())
+        pending = self.root / ".ai-memory" / "review" / "pending.json"
+        self.assertTrue(pending.is_file())
+        self.assertEqual(0o600, stat.S_IMODE(pending.stat().st_mode))
+        self.assertEqual("ready", pending_review_status(self.root)["status"])
+        self.assertNotEqual("PM-20261010-ABC123", preview["proposal_id"])
+        repeated = stage_change(self.root, self.change_plan())
+        self.assertEqual(preview["proposal_id"], repeated["proposal_id"])
+
+    def test_stage_refuses_silent_replacement(self) -> None:
+        self.initialize()
+        first = stage_change(self.root, self.change_plan("First preference."))
+        with self.assertRaisesRegex(RuntimeError, "another memory review is pending"):
+            stage_change(self.root, self.change_plan("Second preference."))
+        second = stage_change(
+            self.root,
+            self.change_plan("Second preference."),
+            replace_pending=True,
+        )
+        self.assertNotEqual(first["proposal_id"], second["proposal_id"])
+
+    def test_apply_pending_rechecks_and_removes_review(self) -> None:
+        self.initialize()
+        preview = stage_change(self.root, self.change_plan())
+        receipt = apply_pending_change(
+            self.root, approval_ref=preview["proposal_id"]
+        )
+        self.assertEqual("applied", receipt["result"])
+        self.assertEqual("removed", receipt["pending_review"])
+        self.assertEqual("none", pending_review_status(self.root)["status"])
+        self.assertEqual(1, load_manifest(self.root)["generation"])
+
+    def test_pending_tamper_is_detected(self) -> None:
+        self.initialize()
+        stage_change(self.root, self.change_plan())
+        pending = self.root / ".ai-memory" / "review" / "pending.json"
+        record = json.loads(pending.read_text(encoding="utf-8"))
+        record["change"]["reason"] = "Changed after review."
+        pending.write_text(json.dumps(record), encoding="utf-8")
+        self.assertEqual("invalid", pending_review_status(self.root)["status"])
+        with self.assertRaisesRegex(RuntimeError, "content binding changed"):
+            load_pending_change(self.root)
+        receipt = discard_pending_change(self.root)
+        self.assertEqual("discarded", receipt["result"])
+        self.assertEqual("none", pending_review_status(self.root)["status"])
+
+    def test_stale_pending_can_be_explicitly_replaced(self) -> None:
+        self.initialize()
+        stage_change(self.root, self.change_plan("First preference."))
+        manifest_path = self.root / ".ai-memory" / "manifest.json"
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+        manifest["generation"] = 1
+        manifest_path.write_text(
+            json.dumps(manifest, indent=2, sort_keys=True) + "\n",
+            encoding="utf-8",
+        )
+        self.assertEqual("stale", pending_review_status(self.root)["status"])
+        replacement = self.change_plan("Second preference.")
+        replacement["base_generation"] = 1
+        preview = stage_change(self.root, replacement, replace_pending=True)
+        self.assertEqual("awaiting-approval", preview["status"])
+        self.assertEqual("ready", pending_review_status(self.root)["status"])
 
     def test_path_escape_is_rejected(self) -> None:
         self.initialize()
@@ -242,6 +322,106 @@ class ProjectManagerTests(unittest.TestCase):
         payload = json.loads(result.stdout)
         self.assertEqual("project-manager/refresh/1", payload["schema"])
         self.assertEqual(before, manifest.read_bytes())
+
+    def test_cli_change_preview_reads_stdin_and_stages_visible_review(self) -> None:
+        self.initialize()
+        result = subprocess.run(
+            [
+                sys.executable,
+                "-m",
+                "project_manager",
+                "change",
+                "preview",
+                "-",
+                str(self.root),
+            ],
+            input=json.dumps(self.change_plan()),
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+        self.assertEqual(0, result.returncode, result.stderr)
+        self.assertIn("Memory change ready for review", result.stdout)
+        self.assertIn("approve the pending memory change", result.stdout)
+        self.assertTrue((self.root / ".ai-memory/review/pending.json").is_file())
+
+    def test_cli_review_apply_uses_bound_reference_and_compact_receipt(self) -> None:
+        self.initialize()
+        preview = stage_change(self.root, self.change_plan())
+        result = subprocess.run(
+            [
+                sys.executable,
+                "-m",
+                "project_manager",
+                "review",
+                "apply",
+                str(self.root),
+                "--approval-ref",
+                preview["proposal_id"],
+            ],
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+        self.assertEqual(0, result.returncode, result.stderr)
+        self.assertIn("Memory updated", result.stdout)
+        self.assertIn("Pending proposal: Removed", result.stdout)
+
+    def test_cli_feedback_draft_reads_stdin(self) -> None:
+        self.initialize()
+        payload = {
+            "scope": "project",
+            "initial_request_summary": "Create a compact report.",
+            "observed_response_summary": "The response duplicated context.",
+            "user_correction": "Keep one authoritative owner.",
+            "desired_future_behavior": "Link instead of duplicating.",
+            "evidence": ["docs/report.md"],
+        }
+        result = subprocess.run(
+            [
+                sys.executable,
+                "-m",
+                "project_manager",
+                "feedback",
+                "draft",
+                str(self.root),
+                "--input",
+                "-",
+                "--json",
+            ],
+            input=json.dumps(payload),
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+        self.assertEqual(0, result.returncode, result.stderr)
+        preview = json.loads(result.stdout)
+        self.assertEqual("awaiting-approval", preview["status"])
+        self.assertTrue(preview["operations"][0]["path"].startswith(
+            ".ai-memory/feedback/FB-"
+        ))
+
+    def test_cli_output_must_be_visible_and_project_local(self) -> None:
+        self.initialize()
+        result = subprocess.run(
+            [
+                sys.executable,
+                "-m",
+                "project_manager",
+                "change",
+                "preview",
+                "-",
+                str(self.root),
+                "--output",
+                ".hidden/plan.json",
+            ],
+            input=json.dumps(self.change_plan()),
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+        self.assertEqual(2, result.returncode)
+        self.assertIn("visible project-relative path", result.stderr)
 
 
 if __name__ == "__main__":

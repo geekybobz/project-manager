@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "project-manager-memory"
-version = "0.3.0"
+version = "0.4.0"
 description = "Portable repository-local project memory and active-task handoffs"
 readme = "README.md"
 requires-python = ">=3.10"
@@ -21,4 +21,4 @@ packages = ["project_manager"]
 include-package-data = true
 
 [tool.setuptools.package-data]
-project_manager = ["templates/project-memory/*.md", "templates/project-memory/*.json", "templates/project-memory/rules/*.md"]
+project_manager = ["templates/project-memory/*.md", "templates/project-memory/*.json", "templates/project-memory/rules/*.md", "templates/project-memory/review/*.md", "templates/project-memory/review/.gitignore"]

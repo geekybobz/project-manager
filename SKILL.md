@@ -29,6 +29,10 @@ checkpoints even when the user does not repeat a save command.
 - Never silently edit project memory. Show the structured change proposal from
   [change review](references/change-review.md), then wait for explicit approval
   of that exact proposal.
+- Keep at most one unapproved proposal at the visible fixed path
+  `.ai-memory/review/pending.json`. It is review material, not durable memory,
+  approval, or history; never replace it silently, and remove it after apply or
+  explicit rejection.
 - Do not create per-task folders, a chronological task diary, a background
   watcher, telemetry, or an automatic transcript logger.
 - Do not scan `feedback/` during normal task work. Feedback cases are evidence
@@ -96,7 +100,10 @@ Interpret these as intent controls, not permission bypasses:
 - `#> feedback <correction>`: propose one feedback case; do not generalize or
   change rules automatically.
 
-All write commands produce a preview first and require explicit approval.
+All write commands produce a preview first and require explicit approval. Lead
+with a compact plain-language summary, then show the exact proposed content or
+diff. Keep binding hashes internal; ask for the ordinary approval phrase or the
+interactive `review apply` command.
 
 The deterministic terminal companion uses `project-manager` (short alias:
 `pmem`):
@@ -109,14 +116,22 @@ The deterministic terminal companion uses `project-manager` (short alias:
 - `project-manager refresh . --format json`: return a read-only refresh packet
   with freshness, source identities, core memory, rule candidates, and a
   non-persistent deduplication key.
-- `project-manager change preview PLAN.json`: validate an exact model-prepared
-  change.
-- `project-manager change apply PLAN.json --approval-ref PM-...`: atomically
-  apply only the approved plan.
+- `project-manager change preview - .`: read a plan from standard input,
+  validate it, and stage the exact review at `.ai-memory/review/pending.json`;
+  a visible file path may replace `-`.
+- `project-manager review show .`: inspect the one pending proposal.
+- `project-manager review apply .`: show it and ask for interactive approval;
+  non-interactive apply requires an approval reference obtained from actual
+  agreement.
+- `project-manager review discard .`: explicitly reject and remove the pending
+  proposal without changing durable memory.
+- `project-manager change apply PLAN.json --approval-ref PM-...`: compatibility
+  form that applies only when the supplied plan matches the pending review.
 - `project-manager handoff show .` or `handoff clear`: inspect or prepare an
   idle handoff.
-- `project-manager feedback draft . --input FEEDBACK.json`: prepare a bounded
-  feedback change without applying it.
+- `project-manager feedback draft . --input -`: prepare a bounded feedback
+  change from standard input and stage it for review; a visible file path may
+  replace `-`.
 
 ## Routing
 

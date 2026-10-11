@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import difflib
 import json
 import sys
 from pathlib import Path
@@ -11,16 +12,22 @@ from typing import Any
 from project_manager import __version__
 from project_manager.core import (
     ProjectManagerError,
-    apply_change,
+    MAX_PENDING_BYTES,
+    PENDING_REVIEW_PATH,
+    apply_pending_change,
     apply_initialization,
     context_payload,
+    discard_pending_change,
     feedback_change,
     handoff_clear_change,
     initial_files,
-    load_change,
+    load_pending_change,
+    pending_matches_change,
+    pending_review_status,
     preview_change,
     refresh_payload,
     resolve_root,
+    stage_change,
     validate,
 )
 
@@ -32,11 +39,103 @@ def _emit(payload: Any, *, as_json: bool = False) -> None:
         print(payload)
 
 
-def _write_plan(path: str | None, plan: dict[str, Any]) -> None:
+def _read_json_source(source: str, *, label: str) -> dict[str, Any]:
+    if source == "-":
+        text = sys.stdin.read(MAX_PENDING_BYTES + 1)
+        if len(text.encode("utf-8")) > MAX_PENDING_BYTES:
+            raise ProjectManagerError(f"{label} input exceeds the size limit")
+    else:
+        path = Path(source).expanduser().resolve()
+        try:
+            if path.stat().st_size > MAX_PENDING_BYTES:
+                raise ProjectManagerError(f"{label} input exceeds the size limit")
+            text = path.read_text(encoding="utf-8")
+        except FileNotFoundError as exc:
+            raise ProjectManagerError(f"missing {label} input: {path}") from exc
+    try:
+        payload = json.loads(text)
+    except json.JSONDecodeError as exc:
+        raise ProjectManagerError(f"invalid {label} JSON: {exc}") from exc
+    if not isinstance(payload, dict):
+        raise ProjectManagerError(f"{label} input must be a JSON object")
+    return payload
+
+
+def _output_target(root: Path, path: str | None) -> Path | None:
     if not path:
+        return None
+    candidate = Path(path)
+    if (
+        candidate.is_absolute()
+        or ".." in candidate.parts
+        or any(part.startswith(".") for part in candidate.parts)
+    ):
+        raise ProjectManagerError(
+            "--output must be a visible project-relative path"
+        )
+    target = (root / candidate).resolve()
+    if root != target and root not in target.parents:
+        raise ProjectManagerError("--output must remain inside the project")
+    return target
+
+
+def _write_plan(root: Path, path: str | None, plan: dict[str, Any]) -> None:
+    target = _output_target(root, path)
+    if target is None:
         return
-    target = Path(path).expanduser().resolve()
+    target.parent.mkdir(parents=True, exist_ok=True)
     target.write_text(json.dumps(plan, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+
+
+def _preview_text(root: Path, preview: dict[str, Any]) -> str:
+    operations = preview.get("operations", [])
+    paths = [item["path"] for item in operations]
+    lines = [
+        "Memory change ready for review",
+        "",
+        f"Purpose: {preview.get('reason', 'Update project memory.')}",
+        f"Will change: {len(paths)} file(s) — {', '.join(paths)}",
+        "Memory changed: No; this is only a review proposal.",
+        "Checked: Project identity, generation, paths, current bytes, size and secrets passed.",
+        f"Inspect: {preview.get('pending_path', PENDING_REVIEW_PATH)}",
+        'Approve: Reply “approve the pending memory change” or run '
+        '`project-manager review apply .`.',
+        "",
+        "Exact proposal:",
+    ]
+    for operation in operations:
+        relative = operation["path"]
+        proposed = operation["content"]
+        lines.extend(["", f"--- {relative} ({operation['operation']})"])
+        if operation["operation"] == "add":
+            lines.append(proposed.rstrip())
+            continue
+        current = (root / relative).read_text(encoding="utf-8")
+        diff = difflib.unified_diff(
+            current.splitlines(),
+            proposed.splitlines(),
+            fromfile=f"current/{relative}",
+            tofile=f"proposed/{relative}",
+            lineterm="",
+        )
+        lines.extend(diff)
+    return "\n".join(lines).rstrip() + "\n"
+
+
+def _receipt_text(receipt: dict[str, Any]) -> str:
+    files = receipt.get("files", [])
+    generation = receipt.get("generation", {})
+    return "\n".join(
+        [
+            "Memory updated",
+            "",
+            f"Changed: {', '.join(files) if files else 'Nothing'}",
+            f"Checked: {receipt.get('validation', 'not reported')}",
+            f"Generation: {generation.get('old', '?')} → {generation.get('new', '?')}",
+            "Pending proposal: Removed.",
+            "Next: No further memory action is required.",
+        ]
+    )
 
 
 def cmd_init(args: argparse.Namespace) -> int:
@@ -84,19 +183,49 @@ def cmd_status(args: argparse.Namespace) -> int:
             "errors": ["project memory is not initialized"],
             "warnings": [],
             "stale_paths": [],
+            "pending_review": {
+                "status": "none",
+                "path": PENDING_REVIEW_PATH,
+                "proposal_id": None,
+                "files": [],
+            },
         }
         _emit(payload, as_json=args.json)
         return 1
     payload = validate(root).as_dict()
-    _emit(payload, as_json=args.json)
-    return 0 if payload["valid"] and not payload["stale_paths"] else 1
+    if args.json:
+        _emit(payload, as_json=True)
+    else:
+        pending = payload["pending_review"]
+        print(f"Project memory: {'valid' if payload['valid'] else 'needs attention'}")
+        print(f"Generation: {payload['generation']}")
+        print(f"Fresh: {'yes' if not payload['stale_paths'] else 'no'}")
+        print(f"Pending review: {pending['status']} — {pending['path']}")
+        if payload["errors"]:
+            print("Next: Run `project-manager check . --json` for the exact errors.")
+        elif pending["status"] == "ready":
+            print("Next: Run `project-manager review show .`.")
+        elif pending["status"] in {"stale", "invalid"}:
+            print("Next: Inspect or discard the pending review before continuing.")
+        else:
+            print("Next: No action required.")
+    return 0 if (
+        payload["valid"]
+        and not payload["stale_paths"]
+        and payload["pending_review"]["status"] in {"none", "ready"}
+    ) else 1
 
 
 def cmd_check(args: argparse.Namespace) -> int:
     root = resolve_root(args.root)
     result = validate(root)
-    _emit(result.as_dict(), as_json=args.json)
-    return 0 if result.valid and not result.stale_paths else 1
+    payload = result.as_dict()
+    _emit(payload, as_json=args.json)
+    return 0 if (
+        result.valid
+        and not result.stale_paths
+        and payload["pending_review"]["status"] in {"none", "ready"}
+    ) else 1
 
 
 def cmd_context(args: argparse.Namespace) -> int:
@@ -169,16 +298,26 @@ def cmd_refresh(args: argparse.Namespace) -> int:
 
 def cmd_change_preview(args: argparse.Namespace) -> int:
     root = resolve_root(args.root)
-    change = load_change(Path(args.change).expanduser().resolve())
-    _emit(preview_change(root, change), as_json=args.json)
+    _output_target(root, args.output)
+    change = _read_json_source(args.change, label="change")
+    preview = stage_change(root, change, replace_pending=args.replace_pending)
+    _write_plan(root, args.output, load_pending_change(root))
+    if args.json:
+        _emit(preview, as_json=True)
+    else:
+        print(_preview_text(root, preview), end="")
     return 0
 
 
 def cmd_change_apply(args: argparse.Namespace) -> int:
     root = resolve_root(args.root)
-    change = load_change(Path(args.change).expanduser().resolve())
-    receipt = apply_change(root, change, approval_ref=args.approval_ref)
-    _emit(receipt, as_json=args.json)
+    change = _read_json_source(args.change, label="change")
+    pending_matches_change(root, change)
+    receipt = apply_pending_change(root, approval_ref=args.approval_ref)
+    if args.json:
+        _emit(receipt, as_json=True)
+    else:
+        print(_receipt_text(receipt))
     return 0
 
 
@@ -190,34 +329,107 @@ def cmd_handoff_show(args: argparse.Namespace) -> int:
 
 def cmd_handoff_clear(args: argparse.Namespace) -> int:
     root = resolve_root(args.root)
+    _output_target(root, args.output)
     change = handoff_clear_change(root)
-    _write_plan(args.output, change)
+    preview = stage_change(root, change, replace_pending=args.replace_pending)
+    _write_plan(root, args.output, load_pending_change(root))
     if args.apply:
         if not args.approval_ref:
             raise ProjectManagerError("--approval-ref is required with --apply")
-        _emit(
-            apply_change(root, change, approval_ref=args.approval_ref),
-            as_json=args.json,
-        )
+        receipt = apply_pending_change(root, approval_ref=args.approval_ref)
+        _emit(receipt, as_json=args.json)
     else:
-        _emit(preview_change(root, change), as_json=args.json)
+        _emit(preview, as_json=True) if args.json else print(
+            _preview_text(root, preview), end=""
+        )
     return 0
 
 
 def cmd_feedback_draft(args: argparse.Namespace) -> int:
     root = resolve_root(args.root)
-    input_path = Path(args.input).expanduser().resolve()
-    try:
-        payload = json.loads(input_path.read_text(encoding="utf-8"))
-    except FileNotFoundError as exc:
-        raise ProjectManagerError(f"missing feedback input: {input_path}") from exc
-    except json.JSONDecodeError as exc:
-        raise ProjectManagerError(f"invalid feedback JSON: {exc}") from exc
-    if not isinstance(payload, dict):
-        raise ProjectManagerError("feedback input must be a JSON object")
+    _output_target(root, args.output)
+    payload = _read_json_source(args.input, label="feedback")
     change = feedback_change(root, payload)
-    _write_plan(args.output, change)
-    _emit(preview_change(root, change), as_json=args.json)
+    preview = stage_change(root, change, replace_pending=args.replace_pending)
+    _write_plan(root, args.output, load_pending_change(root))
+    _emit(preview, as_json=True) if args.json else print(
+        _preview_text(root, preview), end=""
+    )
+    return 0
+
+
+def cmd_review_show(args: argparse.Namespace) -> int:
+    root = resolve_root(args.root)
+    change = load_pending_change(root, validate_current=False)
+    pending_status = pending_review_status(root)["status"]
+    preview = {
+        "schema": "project-manager/change-preview/1",
+        "proposal_id": change["proposal_id"],
+        "project_id": change["project_id"],
+        "base_generation": change["base_generation"],
+        "reason": change.get("reason", "Update project memory."),
+        "status": "awaiting-approval" if pending_status == "ready" else pending_status,
+        "operations": change["operations"],
+        "pending_path": PENDING_REVIEW_PATH,
+        "staged": True,
+    }
+    _emit(preview, as_json=True) if args.json else print(
+        _preview_text(root, preview), end=""
+    )
+    return 0
+
+
+def cmd_review_apply(args: argparse.Namespace) -> int:
+    root = resolve_root(args.root)
+    change = load_pending_change(root)
+    approval_ref = args.approval_ref
+    if not approval_ref:
+        if not sys.stdin.isatty():
+            raise ProjectManagerError(
+                "interactive confirmation is unavailable; provide --approval-ref "
+                "only after actual approval"
+            )
+        preview = preview_change(root, change) | {
+            "pending_path": PENDING_REVIEW_PATH,
+            "staged": True,
+        }
+        print(_preview_text(root, preview), end="")
+        answer = input("Apply this exact memory change? [y/N] ").strip().lower()
+        if answer not in {"y", "yes"}:
+            print("Not applied — the pending review remains unchanged.")
+            return 0
+        approval_ref = change["proposal_id"]
+    receipt = apply_pending_change(root, approval_ref=approval_ref)
+    _emit(receipt, as_json=True) if args.json else print(_receipt_text(receipt))
+    return 0
+
+
+def cmd_review_discard(args: argparse.Namespace) -> int:
+    root = resolve_root(args.root)
+    status = pending_review_status(root)
+    if status["status"] == "none":
+        raise ProjectManagerError("no pending memory review to discard")
+    if not args.confirm:
+        if not sys.stdin.isatty():
+            raise ProjectManagerError(
+                "interactive confirmation is unavailable; rerun with --confirm "
+                "after explicit rejection"
+            )
+        answer = input(
+            f"Discard {PENDING_REVIEW_PATH} without changing memory? [y/N] "
+        ).strip().lower()
+        if answer not in {"y", "yes"}:
+            print("Not discarded — the pending review remains unchanged.")
+            return 0
+    receipt = discard_pending_change(root)
+    if args.json:
+        _emit(receipt, as_json=True)
+    else:
+        print("Pending memory review discarded")
+        print()
+        print(f"Removed: {receipt['path']}")
+        print("Memory changed: No.")
+        print("Next: No further review action is required.")
     return 0
 
 
@@ -262,6 +474,8 @@ def build_parser() -> argparse.ArgumentParser:
     change_preview = change_commands.add_parser("preview")
     change_preview.add_argument("change")
     change_preview.add_argument("root", nargs="?", default=".")
+    change_preview.add_argument("--replace-pending", action="store_true")
+    change_preview.add_argument("--output")
     change_preview.add_argument("--json", action="store_true")
     change_preview.set_defaults(handler=cmd_change_preview)
     change_apply = change_commands.add_parser("apply")
@@ -281,6 +495,7 @@ def build_parser() -> argparse.ArgumentParser:
     handoff_clear.add_argument("--output")
     handoff_clear.add_argument("--apply", action="store_true")
     handoff_clear.add_argument("--approval-ref")
+    handoff_clear.add_argument("--replace-pending", action="store_true")
     handoff_clear.add_argument("--json", action="store_true")
     handoff_clear.set_defaults(handler=cmd_handoff_clear)
 
@@ -290,8 +505,26 @@ def build_parser() -> argparse.ArgumentParser:
     feedback_draft.add_argument("root", nargs="?", default=".")
     feedback_draft.add_argument("--input", required=True)
     feedback_draft.add_argument("--output")
+    feedback_draft.add_argument("--replace-pending", action="store_true")
     feedback_draft.add_argument("--json", action="store_true")
     feedback_draft.set_defaults(handler=cmd_feedback_draft)
+
+    review = commands.add_parser("review", help="inspect, apply, or discard one pending change")
+    review_commands = review.add_subparsers(dest="review_command", required=True)
+    review_show = review_commands.add_parser("show")
+    review_show.add_argument("root", nargs="?", default=".")
+    review_show.add_argument("--json", action="store_true")
+    review_show.set_defaults(handler=cmd_review_show)
+    review_apply = review_commands.add_parser("apply")
+    review_apply.add_argument("root", nargs="?", default=".")
+    review_apply.add_argument("--approval-ref")
+    review_apply.add_argument("--json", action="store_true")
+    review_apply.set_defaults(handler=cmd_review_apply)
+    review_discard = review_commands.add_parser("discard")
+    review_discard.add_argument("root", nargs="?", default=".")
+    review_discard.add_argument("--confirm", action="store_true")
+    review_discard.add_argument("--json", action="store_true")
+    review_discard.set_defaults(handler=cmd_review_discard)
     return parser
 
 

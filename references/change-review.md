@@ -7,38 +7,32 @@ read_when: Read immediately before proposing or applying any `.ai-memory/` edit.
 # Project Memory change review
 
 Every creation, edit, clear, archive, restore, or deletion uses two phases.
-Reading and validation are not writes.
+Reading and validation are not durable-memory writes. A validated proposal may
+be held at the fixed visible review path `.ai-memory/review/pending.json` so an
+exact approval can survive a message, process, or context boundary.
 
 ## Phase 1: proposal
 
-Use one stable proposal ID and show:
+Accept plan JSON from standard input by default. Validate and content-bind it,
+then place one normalized proposal at the fixed review path. Never silently
+replace another pending proposal. Show a compact summary first:
 
 ```text
-Project Memory change — PM-YYYYMMDD-NNN
+Memory change ready for review
 
-Reason: <why durable memory should change>
-Operation: add | update | replace | clear | archive | delete
-Files:
-- <project-relative path>
-Scope: project | handoff | feedback | technical metadata
-Status: awaiting approval
-
-Current:
-<exact current text, or "file does not exist">
-
-Proposed:
-<exact replacement/addition, with no hidden edits>
-
-Effect:
-<what future models will do differently>
-
-Reply: Approve PM-YYYYMMDD-NNN, request changes, or reject.
+Purpose: <why durable memory should change>
+Will change: <count and project-relative paths>
+Memory changed: No; this is only a review proposal.
+Checked: <identity, generation, paths, bytes, size, privacy>
+Inspect: .ai-memory/review/pending.json
+Approve: Reply “approve the pending memory change” or run
+`project-manager review apply .`.
 ```
 
-For several files, give each file its own Current and Proposed block. A compact
-unified diff may replace those blocks only when it is easier to review. State
-whether durable rules, active handoff, feedback, manifest generation, hashes,
-or inventory will change.
+Follow the summary with each exact proposed addition or a compact unified diff.
+State whether durable rules, active handoff, feedback, manifest generation,
+hashes, or inventory will change. Keep the internal full-content binding in
+JSON; do not make the user interpret or copy a digest.
 
 ## Approval boundary
 
@@ -47,24 +41,31 @@ different operation, or changed target invalidates approval and requires a new
 proposal. Approval for a memory edit does not authorize Git operations or any
 external effect.
 
+The pending file is omitted from the memory manifest. New initialized projects
+ignore it through the review-area template; an older project may show it as an
+untracked file until the proposal is consumed. It is not approval or durable
+context. `review show` may inspect it, `review apply` rechecks and consumes it,
+and `review discard` removes it after explicit rejection. A stale or invalid
+proposal remains visible and cannot be applied.
+
 ## Phase 2: write and receipt
 
-Immediately before writing, confirm the recorded generation and current bytes
-still match the proposal. Use atomic same-directory replacement and private
-permissions for untracked operational files. Validate links, JSON, required
+Immediately before writing, confirm the recorded generation, project identity,
+content binding, and current bytes still match the proposal. Use atomic
+same-directory replacement; every transient write remains under `.ai-memory/`
+and is removed after replacement or failure. Validate links, JSON, required
 sections, inventory, and hashes proportionally.
 
 Return:
 
 ```text
-Project Memory receipt — PM-YYYYMMDD-NNN
+Memory updated
 
-Result: applied | not applied | partially recovered
-Files:
-- <project-relative path>
-Validation: <checks and honest result>
-Generation: <old> -> <new>
-Backup: <none, removed, or exact retained path>
+Changed: <project-relative paths>
+Checked: <plain result>
+Generation: <old> → <new>
+Pending proposal: Removed.
+Next: <exact action, or “No further memory action is required.”>
 ```
 
 If interrupted or partially applied, stop, preserve the last known-good bytes,

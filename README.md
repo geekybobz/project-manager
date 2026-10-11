@@ -23,12 +23,16 @@ not entrusted only to a model account's private memory.
 - Install the terminal command: `python3 -m pip install .`
 - Preview initialization: `project-manager init /path/to/project`
 - Prepare an active-chat refresh packet: `project-manager refresh /path/to/project`
+- Stage a plan from standard input: `project-manager change preview - /path/to/project`
+- Resume a pending review: `project-manager review show /path/to/project`
 - Review released behavior: [changelog](CHANGELOG.md)
 
 The terminal interface initializes and validates memory, emits compact recovery
-and refresh packets, prepares feedback, and applies exact approved change plans. A broader
-cross-project registry can be added later without changing the repository-local
-file contract.
+and refresh packets, prepares feedback, and holds one exact unapproved proposal
+at the visible fixed path `.ai-memory/review/pending.json`. Human receipts lead
+with the outcome, checks, pending state, and next command before technical
+detail. A broader cross-project registry can be added later without changing
+the repository-local file contract.
 
 ## Boundaries
 

@@ -27,13 +27,17 @@ read_when: Use when the operational entry points to a specific workflow.
 - [Active handoff](project_manager/templates/project-memory/HANDOFF.md)
 - [Machine manifest](project_manager/templates/project-memory/manifest.json)
 - [Rules index](project_manager/templates/project-memory/rules/README.md)
+- [Pending-review explanation](project_manager/templates/project-memory/review/README.md)
 
 ## Terminal interface
 
 - `project-manager init`: deterministic initialization preview and apply.
 - `project-manager status`, `check`, `context`, and `refresh`: read-only inspection
   and active-context recovery packets.
-- `project-manager change`: exact preview and atomic approved apply.
+- `project-manager change`: stage a content-bound preview from standard input
+  or a visible plan file.
+- `project-manager review`: show, interactively apply, or explicitly discard
+  the one pending proposal.
 - `project-manager handoff` and `feedback`: focused lifecycle helpers.
 - `pmem`: short alias for the same executable.
 

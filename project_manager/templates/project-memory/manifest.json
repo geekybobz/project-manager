@@ -10,6 +10,8 @@
   "tracked_paths": [
     ".ai-memory/README.md",
     ".ai-memory/HANDOFF.md",
+    ".ai-memory/review/.gitignore",
+    ".ai-memory/review/README.md",
     ".ai-memory/rules/README.md"
   ],
   "file_hashes": {},
