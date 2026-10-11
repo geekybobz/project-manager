@@ -22,10 +22,11 @@ not entrusted only to a model account's private memory.
 - Verify the package: `python3 scripts/verify_package.py`
 - Install the terminal command: `python3 -m pip install .`
 - Preview initialization: `project-manager init /path/to/project`
+- Prepare an active-chat refresh packet: `project-manager refresh /path/to/project`
 - Review released behavior: [changelog](CHANGELOG.md)
 
 The terminal interface initializes and validates memory, emits compact recovery
-context, prepares feedback, and applies exact approved change plans. A broader
+and refresh packets, prepares feedback, and applies exact approved change plans. A broader
 cross-project registry can be added later without changing the repository-local
 file contract.
 

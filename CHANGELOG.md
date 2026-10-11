@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.3.0
+
+Adds read-only Project Manager refresh for re-anchoring a long-running chat to
+current repository authority and project memory without flushing live task
+state, changing mode, scanning feedback, or writing persistent refresh data.
+The deterministic refresh packet reports freshness, source identities, core
+memory, rule candidates, and a non-persistent deduplication key. Existing
+`context` and `resume` behavior remains compatible.
+
 ## 0.2.1
 
 Clarifies that mandatory Project Manager support applies to every project or

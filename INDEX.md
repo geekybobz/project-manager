@@ -14,6 +14,8 @@ read_when: Use when the operational entry points to a specific workflow.
   create, inspect, move, recover, and handle concurrent changes.
 - [Handoff protocol](references/handoff.md): task receipt, checkpoints, resume,
   and completion.
+- [Refresh protocol](references/refresh.md): read-only active-chat re-anchoring,
+  selective rule recovery, reconciliation, and deduplication.
 - [Feedback protocol](references/feedback.md): capture bounded examples for
   later improvement without changing behavior automatically.
 - [Change review](references/change-review.md): mandatory preview, approval,
@@ -29,7 +31,8 @@ read_when: Use when the operational entry points to a specific workflow.
 ## Terminal interface
 
 - `project-manager init`: deterministic initialization preview and apply.
-- `project-manager status`, `check`, and `context`: read-only inspection.
+- `project-manager status`, `check`, `context`, and `refresh`: read-only inspection
+  and active-context recovery packets.
 - `project-manager change`: exact preview and atomic approved apply.
 - `project-manager handoff` and `feedback`: focused lifecycle helpers.
 - `pmem`: short alias for the same executable.

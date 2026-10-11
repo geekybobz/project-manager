@@ -26,6 +26,7 @@ REQUIRED_PATHS = (
 )
 MAX_CONTEXT_BYTES = 48 * 1024
 MAX_CHANGE_BYTES = 64 * 1024
+AUTHORITY_CANDIDATES = ("AGENTS.md", "CLAUDE.md")
 PROPOSAL_RE = re.compile(r"^PM-\d{8}-[A-Z0-9]{6}$")
 SECRET_PATTERNS = (
     re.compile(r"-----BEGIN (?:RSA |EC |OPENSSH )?PRIVATE KEY-----"),
@@ -309,6 +310,97 @@ def context_payload(root: Path) -> dict[str, Any]:
         "readme": readme,
         "handoff": handoff,
         "rule_paths": rule_paths,
+    }
+
+
+def refresh_payload(root: Path) -> dict[str, Any]:
+    """Return a read-only packet for re-anchoring an active model context."""
+    result = validate(root)
+    if result.errors:
+        raise ProjectManagerError("project memory is invalid; run project-manager check")
+    manifest = load_manifest(root)
+    tracked = manifest.get("tracked_paths", [])
+    rule_index_path = ".ai-memory/rules/README.md"
+    rule_paths = sorted(
+        relative
+        for relative in tracked
+        if relative.startswith(".ai-memory/rules/") and relative != rule_index_path
+    )
+    authority_paths = [
+        relative
+        for relative in AUTHORITY_CANDIDATES
+        if (root / relative).is_file() and not (root / relative).is_symlink()
+    ]
+    source_paths = [
+        *authority_paths,
+        ".ai-memory/README.md",
+        ".ai-memory/HANDOFF.md",
+        rule_index_path,
+        *rule_paths,
+    ]
+    stale = set(result.stale_paths)
+    sources = []
+    for relative in source_paths:
+        target = root / relative
+        sources.append(
+            {
+                "path": relative,
+                "sha256": sha256_file(target),
+                "bytes": target.stat().st_size,
+                "freshness": "stale" if relative in stale else "current",
+            }
+        )
+
+    readme = (root / MEMORY_DIR / "README.md").read_text(encoding="utf-8")
+    handoff = (root / MEMORY_DIR / "HANDOFF.md").read_text(encoding="utf-8")
+    rule_index = (root / MEMORY_DIR / "rules" / "README.md").read_text(
+        encoding="utf-8"
+    )
+    total = sum(len(value.encode()) for value in (readme, handoff, rule_index))
+    if total > MAX_CONTEXT_BYTES:
+        raise ProjectManagerError("refresh core exceeds the context byte limit")
+
+    key_material = {
+        "project_id": manifest["project_id"],
+        "generation": manifest["generation"],
+        "sources": [(item["path"], item["sha256"]) for item in sources],
+    }
+    refresh_key = sha256_bytes(
+        json.dumps(key_material, sort_keys=True, separators=(",", ":")).encode()
+    )
+    records = {item["path"]: item for item in sources}
+    return {
+        "schema": "project-manager/refresh/1",
+        "root": str(root),
+        "project_id": manifest["project_id"],
+        "generation": manifest["generation"],
+        "fresh": not result.stale_paths,
+        "stale_paths": list(result.stale_paths),
+        "refresh_key": refresh_key,
+        "authority_candidates": [records[path] for path in authority_paths],
+        "core": {
+            "readme": readme,
+            "handoff": handoff,
+            "rule_index": rule_index,
+        },
+        "required_core_paths": [
+            ".ai-memory/README.md",
+            ".ai-memory/HANDOFF.md",
+            rule_index_path,
+        ],
+        "rule_candidates": [records[path] for path in rule_paths],
+        "sources": sources,
+        "effects": {
+            "writes": False,
+            "persistent_state": False,
+            "feedback_scanned": False,
+            "mode": "unchanged",
+            "conversation_context": "preserved",
+        },
+        "deduplication": (
+            "Reuse this key only while all required complete files are reliably "
+            "retained; uncertainty or compaction requires a complete relevant reload."
+        ),
     }
 
 

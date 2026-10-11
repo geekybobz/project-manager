@@ -90,6 +90,9 @@ Interpret these as intent controls, not permission bypasses:
 - `#> memory save`: propose durable updates and/or an active HANDOFF refresh.
 - `#> handoff`: propose the smallest complete transfer checkpoint.
 - `#> resume`: read-only recovery from current project memory.
+- `#> project-manager refresh`: re-anchor an active chat to current project
+  memory while preserving live task state and mode; read-only and deduplicated
+  only while complete required sources remain reliably retained.
 - `#> feedback <correction>`: propose one feedback case; do not generalize or
   change rules automatically.
 
@@ -103,6 +106,9 @@ The deterministic terminal companion uses `project-manager` (short alias:
 - `project-manager status .` and `project-manager check .`: inspect state and
   freshness without writing.
 - `project-manager context . --format json`: return bounded recovery context.
+- `project-manager refresh . --format json`: return a read-only refresh packet
+  with freshness, source identities, core memory, rule candidates, and a
+  non-persistent deduplication key.
 - `project-manager change preview PLAN.json`: validate an exact model-prepared
   change.
 - `project-manager change apply PLAN.json --approval-ref PM-...`: atomically
@@ -118,6 +124,7 @@ The deterministic terminal companion uses `project-manager` (short alias:
   [initialization and recovery](references/initialization-and-recovery.md)
 - Task receipt, save, handoff, resume, and completion:
   [handoff protocol](references/handoff.md)
+- Active-chat context re-anchoring: [refresh protocol](references/refresh.md)
 - User corrections and future improvement evidence:
   [feedback protocol](references/feedback.md)
 - Exact preview, approval, write, and receipt format:

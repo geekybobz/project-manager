@@ -18,6 +18,7 @@ REQUIRED = (
     "references/core-protocol.md",
     "references/initialization-and-recovery.md",
     "references/handoff.md",
+    "references/refresh.md",
     "references/feedback.md",
     "references/change-review.md",
     "project_manager/__init__.py",
@@ -54,6 +55,7 @@ def main() -> int:
         "#> memory save",
         "#> handoff",
         "#> resume",
+        "#> project-manager refresh",
         "#> feedback",
     ):
         if command not in skill:

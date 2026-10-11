@@ -19,6 +19,7 @@ from project_manager.core import (
     initial_files,
     load_change,
     preview_change,
+    refresh_payload,
     resolve_root,
     validate,
 )
@@ -126,6 +127,46 @@ def cmd_context(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_refresh(args: argparse.Namespace) -> int:
+    root = resolve_root(args.root)
+    payload = refresh_payload(root)
+    if args.format == "json":
+        _emit(payload, as_json=True)
+        return 0
+    print("# Project Manager refresh")
+    print()
+    print(f"Project ID: `{payload['project_id']}`")
+    print(f"Generation: `{payload['generation']}`")
+    print(f"Fresh: `{'yes' if payload['fresh'] else 'no'}`")
+    print(f"Refresh key: `{payload['refresh_key']}`")
+    print()
+    print("## Core memory")
+    print()
+    for relative in payload["required_core_paths"]:
+        print(f"- `{relative}`")
+    if payload["authority_candidates"]:
+        print()
+        print("## Repository authority candidates")
+        print()
+        for item in payload["authority_candidates"]:
+            print(f"- `{item['path']}`")
+    if payload["rule_candidates"]:
+        print()
+        print("## Rule candidates")
+        print()
+        for item in payload["rule_candidates"]:
+            print(f"- `{item['path']}`")
+    if payload["stale_paths"]:
+        print()
+        print("## Freshness warnings")
+        print()
+        for relative in payload["stale_paths"]:
+            print(f"- `{relative}`")
+    print()
+    print("Read-only: live task and mode stay unchanged; no persistent state was written.")
+    return 0
+
+
 def cmd_change_preview(args: argparse.Namespace) -> int:
     root = resolve_root(args.root)
     change = load_change(Path(args.change).expanduser().resolve())
@@ -208,6 +249,13 @@ def build_parser() -> argparse.ArgumentParser:
     context.add_argument("root", nargs="?", default=".")
     context.add_argument("--format", choices=("markdown", "json"), default="markdown")
     context.set_defaults(handler=cmd_context)
+
+    refresh = commands.add_parser(
+        "refresh", help="prepare a read-only active-context refresh packet"
+    )
+    refresh.add_argument("root", nargs="?", default=".")
+    refresh.add_argument("--format", choices=("markdown", "json"), default="markdown")
+    refresh.set_defaults(handler=cmd_refresh)
 
     change = commands.add_parser("change", help="preview or apply an exact change plan")
     change_commands = change.add_subparsers(dest="change_command", required=True)

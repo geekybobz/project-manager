@@ -15,6 +15,7 @@ from project_manager.core import (
     initial_files,
     load_manifest,
     preview_change,
+    refresh_payload,
     sha256_file,
     validate,
 )
@@ -56,6 +57,71 @@ class ProjectManagerTests(unittest.TestCase):
         readme.write_text(readme.read_text() + "\nchanged\n", encoding="utf-8")
         result = validate(self.root)
         self.assertIn(".ai-memory/README.md", result.stale_paths)
+
+    def test_refresh_is_read_only_stable_and_separates_rule_candidates(self) -> None:
+        self.initialize()
+        authority = self.root / "AGENTS.md"
+        authority.write_text("# Project authority\n", encoding="utf-8")
+        rule = self.root / ".ai-memory" / "rules" / "writing.md"
+        rule.write_text("# Writing rule\n", encoding="utf-8")
+        manifest_path = self.root / ".ai-memory" / "manifest.json"
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+        relative = ".ai-memory/rules/writing.md"
+        manifest["tracked_paths"].append(relative)
+        manifest["file_hashes"][relative] = sha256_file(rule)
+        manifest_path.write_text(
+            json.dumps(manifest, indent=2, sort_keys=True) + "\n", encoding="utf-8"
+        )
+        before = {
+            path.relative_to(self.root): path.read_bytes()
+            for path in self.root.rglob("*")
+            if path.is_file()
+        }
+
+        first = refresh_payload(self.root)
+        second = refresh_payload(self.root)
+
+        self.assertEqual("project-manager/refresh/1", first["schema"])
+        self.assertEqual(first["refresh_key"], second["refresh_key"])
+        self.assertEqual("unchanged", first["effects"]["mode"])
+        self.assertFalse(first["effects"]["writes"])
+        self.assertFalse(first["effects"]["persistent_state"])
+        self.assertFalse(first["effects"]["feedback_scanned"])
+        self.assertEqual(
+            ["AGENTS.md"],
+            [item["path"] for item in first["authority_candidates"]],
+        )
+        self.assertEqual(
+            [relative], [item["path"] for item in first["rule_candidates"]]
+        )
+        self.assertNotIn("# Writing rule", first["core"]["rule_index"])
+        after = {
+            path.relative_to(self.root): path.read_bytes()
+            for path in self.root.rglob("*")
+            if path.is_file()
+        }
+        self.assertEqual(before, after)
+
+    def test_refresh_key_changes_and_stale_path_is_reported(self) -> None:
+        self.initialize()
+        first = refresh_payload(self.root)
+        readme = self.root / ".ai-memory" / "README.md"
+        readme.write_text(readme.read_text() + "\nchanged\n", encoding="utf-8")
+        second = refresh_payload(self.root)
+        self.assertNotEqual(first["refresh_key"], second["refresh_key"])
+        self.assertFalse(second["fresh"])
+        self.assertIn(".ai-memory/README.md", second["stale_paths"])
+
+    def test_refresh_does_not_scan_feedback(self) -> None:
+        self.initialize()
+        feedback = self.root / ".ai-memory" / "feedback"
+        feedback.mkdir()
+        (feedback / "FB-example.md").write_text("not tracked\n", encoding="utf-8")
+        payload = refresh_payload(self.root)
+        self.assertFalse(payload["effects"]["feedback_scanned"])
+        self.assertFalse(
+            any(item["path"].startswith(".ai-memory/feedback/") for item in payload["sources"])
+        )
 
     def test_exact_change_updates_generation_and_hash(self) -> None:
         self.initialize()
@@ -153,6 +219,29 @@ class ProjectManagerTests(unittest.TestCase):
         self.assertEqual(0, result.returncode, result.stderr)
         self.assertEqual("preview", json.loads(result.stdout)["status"])
         self.assertFalse((self.root / ".ai-memory").exists())
+
+    def test_cli_refresh_emits_json_packet_without_writing(self) -> None:
+        self.initialize()
+        manifest = self.root / ".ai-memory" / "manifest.json"
+        before = manifest.read_bytes()
+        result = subprocess.run(
+            [
+                sys.executable,
+                "-m",
+                "project_manager",
+                "refresh",
+                str(self.root),
+                "--format",
+                "json",
+            ],
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+        self.assertEqual(0, result.returncode, result.stderr)
+        payload = json.loads(result.stdout)
+        self.assertEqual("project-manager/refresh/1", payload["schema"])
+        self.assertEqual(before, manifest.read_bytes())
 
 
 if __name__ == "__main__":
